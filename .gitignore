@@ -1,2 +1,8 @@
 TODO.txt
 venv/
+.pytest_cache/
+__pycache__/
+htmlcov/
+.coverage
+database.db
+notes.txt
