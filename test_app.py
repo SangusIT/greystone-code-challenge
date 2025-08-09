@@ -24,9 +24,29 @@ def test_create_user(session: Session):
     app.dependency_overrides[get_session] = get_session_override
 
     response = client.post(
-        "/users/", json={"name": "carol", "email": "carol@email.com"})
+        "/user/", json={"name": "carol", "email": "carol@email.com"})
     data = response.json()
     assert response.status_code == 200
-    assert data["name"] == data["name"]
-    assert data["email"] == data["email"]
+    assert data["name"] == "carol"
+    assert data["email"] == "carol@email.com"
+    assert "id" in data
+
+
+def test_create_loan(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    response = client.post(
+        "/loan/", json={
+            "amount": 1000,
+            "annual_interest_rate": 0.03,
+            "loan_term_in_months": 24
+        })
+    data = response.json()
+    assert response.status_code == 200
+    assert data["amount"] == 1000
+    assert data["annual_interest_rate"] == 0.03
+    assert data["loan_term_in_months"] == 24
     assert "id" in data

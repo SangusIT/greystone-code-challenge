@@ -39,9 +39,6 @@ class Loan(SQLModel, table=True):
     loan_term_in_months: int
     users: list["User"] = Relationship(
         back_populates="loans", link_model=UserToLoan)
-    # owner_id: int | None = Field(default=None, foreign_key="user.id")
-    # shared_user_ids: list["User"] = Relationship(back_populates="loan")
-    # model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class LoanCreate(SQLModel):
@@ -51,6 +48,7 @@ class LoanCreate(SQLModel):
 
 
 class LoanPublic(SQLModel):
+    id: int
     amount: float
     annual_interest_rate: float
     loan_term_in_months: int
@@ -83,10 +81,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/users/", response_model=UserPublic)
+@app.post("/user/", response_model=UserPublic)
 def create_user(user: UserCreate, session: SessionDep):
     user = User.model_validate(user)
     session.add(user)
     session.commit()
     session.refresh(user)
     return user
+
+
+@app.post("/loan/", response_model=LoanPublic)
+def create_loan(loan: LoanCreate, session: SessionDep):
+    loan = Loan.model_validate(loan)
+    session.add(loan)
+    session.commit()
+    session.refresh(loan)
+    return loan
