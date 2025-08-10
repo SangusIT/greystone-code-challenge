@@ -1,8 +1,8 @@
 from typing import Annotated, List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import ValidationError
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, Query
-from sqlmodel import Field, Session, SQLModel, create_engine, select, Column, ARRAY, Integer, JSON, Relationship
+from fastapi import Depends, FastAPI, HTTPException
+from sqlmodel import Field, Session, SQLModel, create_engine, Relationship
 
 
 class UserToLoan(SQLModel, table=True):
@@ -42,7 +42,7 @@ class Loan(SQLModel, table=True):
 
 
 class LoanCreate(SQLModel):
-    amount: float
+    amount: float = Field(gt=0)
     annual_interest_rate: float
     loan_term_in_months: int
 
