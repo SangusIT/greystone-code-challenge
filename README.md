@@ -19,11 +19,12 @@ You should now see this when you go to http://127.0.0.1:8000/docs in a browser:
 
 ## Notes
 
+In order to create, share and query loans through the browser documentation page you will first need to create a user and "Log In" by clicking "Authorize" and filling out the username and password fields on this form:
+
+![Image](https://github.com/user-attachments/assets/4cf92a58-67de-4169-8337-7b5c6bbc5966)
+
 - OAuth2 Authentication Required
 - Uses SQLite database
 - Users can only share loans they have created or had shared with them
 - Set up a workflow to run pytest when new pull requests are created
-
-In order to create, share and query loans through the browser documentation page you will first need to create a user and "Log In" by clicking "Authorize" and filling out the username and password fields on this form:
-
-![Image](https://github.com/user-attachments/assets/4cf92a58-67de-4169-8337-7b5c6bbc5966)
+- Added additional endpoints for looking up users and loans for convenience
