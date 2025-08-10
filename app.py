@@ -17,8 +17,8 @@ load_dotenv()
 
 SECRET_KEY: str = os.environ.get("SECRET_KEY")
 ALGORITHM: str = os.environ.get("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
-    os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES"))
+ACCESS_TOKEN_EXPIRE_MINUTES: str = os.environ.get(
+    "ACCESS_TOKEN_EXPIRE_MINUTES")
 
 
 class Token(BaseModel):
@@ -216,7 +216,7 @@ async def get_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=int(ACCESS_TOKEN_EXPIRE_MINUTES))
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
