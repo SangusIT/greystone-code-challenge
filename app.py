@@ -1,8 +1,9 @@
 from typing import Annotated, List, Optional
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError, BaseModel, computed_field, SecretStr
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Form
 from sqlmodel import Field, Session, SQLModel, create_engine, Relationship, select
+from sqlalchemy.exc import IntegrityError, NoResultFound
 from datetime import datetime, timedelta, timezone, date
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
@@ -47,10 +48,10 @@ class User(SQLModel, table=True):
     hashed_password: str = Field(unique=True)
 
 
-class UserCreate(SQLModel):
+class UserCreate(BaseModel):
     username: str
     email: str
-    password: str
+    password: SecretStr
 
 
 class UserPublic(SQLModel):
@@ -70,8 +71,8 @@ class Loan(SQLModel, table=True):
 
 class LoanCreate(SQLModel):
     amount: float = Field(gt=0)
-    annual_interest_rate: float
-    loan_term_in_months: int
+    annual_interest_rate: float = Field(gt=0)
+    loan_term_in_months: int = Field(gt=0)
 
 
 class LoanPublic(SQLModel):
@@ -80,6 +81,7 @@ class LoanPublic(SQLModel):
     annual_interest_rate: float
     loan_term_in_months: int
     users: list["UserPublic"]
+    owner: str | None = None
 
 
 sqlite_file_name = "database.db"
@@ -160,13 +162,13 @@ def get_password_hash(password):
 
 
 def authenticate_user(username: str, password: str, session: SessionDep):
-    statement = select(User).where(User.username == username)
-    result = session.exec(statement)
-    user = False
-    for r in result:
-        user = r
-    if not user:
-        return False
+    try:
+        statement = select(User).where(User.username == username)
+        result = session.exec(statement)
+        user = result.one()
+    except NoResultFound as e:
+        raise HTTPException(
+            status_code=400, detail="No users with that username found.")
     if not verify_password(password, user.hashed_password):
         return False
     return user
@@ -227,8 +229,8 @@ async def get_access_token(
 async def get_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    for u in current_user:
-        user = UserPublic(id=u.id, username=u.username, email=u.email)
+    u = current_user.one()
+    user = UserPublic(id=u.id, username=u.username, email=u.email)
     return user
 
 
@@ -240,8 +242,8 @@ def get_users(session: SessionDep):
 
 
 @app.post("/user/", response_model=UserPublic)
-def create_user(user: UserCreate, session: SessionDep):
-    hashed_password = get_password_hash(user.password)
+def create_user(user: Annotated[UserCreate, Form()], session: SessionDep):
+    hashed_password = get_password_hash(user.password.get_secret_value())
     user = User(hashed_password=hashed_password,
                 email=user.email, username=user.username)
     user = User.model_validate(user)
@@ -251,29 +253,29 @@ def create_user(user: UserCreate, session: SessionDep):
     return user
 
 
-@app.get("/loan/schedule/{load_id}")
-def get_loan_schedule(load_id, session: SessionDep):
-    statement = select(Loan).where(Loan.id == load_id)
-    schedule = session.exec(statement)
-    result = []
-    for s in schedule:
+@app.get("/loan/schedule/{loan_id}")
+def get_loan_schedule(loan_id, session: SessionDep):
+    try:
+        statement = select(Loan).where(Loan.id == loan_id)
+        schedule = session.exec(statement)
+        s = schedule.one()
         result = get_amortization_schedule(
             s.amount, s.loan_term_in_months, s.annual_interest_rate)
-    if len(result) == 0:
+    except NoResultFound as e:
         raise HTTPException(
             status_code=400, detail="No loan with that ID found.")
     return result
 
 
-@app.get("/loan/summary/{load_id}/{month}")
-def get_loan_summary(load_id, month, session: SessionDep):
-    statement = select(Loan).where(Loan.id == load_id)
-    schedule = session.exec(statement)
-    result = []
-    for s in schedule:
+@app.get("/loan/summary/{loan_id}/{month}")
+def get_loan_summary(loan_id, month, session: SessionDep):
+    try:
+        statement = select(Loan).where(Loan.id == loan_id)
+        schedule = session.exec(statement)
+        s = schedule.one()
         result = get_summary(
             s.amount, s.loan_term_in_months, s.annual_interest_rate, int(month))
-    if len(result) == 0:
+    except NoResultFound as e:
         raise HTTPException(
             status_code=400, detail="No loan with that ID found.")
     return result
@@ -281,7 +283,7 @@ def get_loan_summary(load_id, month, session: SessionDep):
 
 @app.post("/loan/", response_model=LoanPublic, dependencies=[Depends(get_current_user)])
 def create_loan(loan: LoanCreate, session: SessionDep, current_user: User = Depends(get_current_user)):
-    user = [u for u in current_user][0]
+    user = current_user.one()
     loan = Loan.model_validate(loan)
     session.add(loan)
     session.commit()
@@ -291,12 +293,44 @@ def create_loan(loan: LoanCreate, session: SessionDep, current_user: User = Depe
     session.add(usertoloan)
     session.commit()
     session.refresh(loan)
+    loan = LoanPublic.model_validate(loan)
+    loan.owner = user.username
     return loan
 
 
-@app.get("/loans/user", response_model=List[Loan], dependencies=[Depends(get_current_user)])
+@app.get("/loans/user", response_model=list[LoanPublic], dependencies=[Depends(get_current_user)])
 def get_user_loans(session: SessionDep, current_user: User = Depends(get_current_user)):
-    user = [u for u in current_user][0]
-    statement = select(Loan).where(Loan.users.any(id=user.id))
-    result = session.exec(statement)
-    return [loan for loan in result]
+    loans = []
+    user = current_user.one()
+    statement = select(Loan, UserToLoan, User).where(
+        Loan.users.any(id=user.id)).where(Loan.id == UserToLoan.loan_id).where(UserToLoan.user_type == "owner").where(User.id == UserToLoan.user_id)
+    results = session.exec(statement)
+
+    for loan, usertoloan, user in results:
+        loan = LoanPublic.model_validate(loan)
+        loan.owner = user.username
+        loans.append(loan)
+    return loans
+
+
+@app.put("/loan/", response_model=LoanPublic, dependencies=[Depends(get_current_user)])
+def share_loan(loan_id, user_id, session: SessionDep, current_user: User = Depends(get_current_user)):
+    user = current_user.one()
+    try:
+        statement = select(Loan).where(
+            Loan.id == loan_id).where(Loan.users.any(id=user.id))
+        results = session.exec(statement)
+        loan = results.one()
+        usertoloan = UserToLoan(
+            user_id=user_id, loan_id=loan.id, user_type="viewer")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail="You can only share loans you've created or that have been shared with you.")
+    try:
+        session.add(usertoloan)
+        session.commit()
+        session.refresh(loan)
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=400, detail="Loan previously shared.")
+    return loan
