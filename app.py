@@ -102,11 +102,6 @@ def get_session():
 
 def get_summary(amount, n, rate, month):
     schedule = get_amortization_schedule(amount, n, rate)
-    """
-    Current principal balance at given month
-    The aggregate amount of principal already paid
-    The aggregate amount of interest already paid
-    """
     principal_balance = schedule[month - 1]["remaining_balance"]
     principal_paid = 0
     interest_paid = 0
