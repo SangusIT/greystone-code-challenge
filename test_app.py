@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
-from app import app, get_session, Loan
+from app import app, get_session, get_password_hash, Loan, User, authenticate_user
 
 client = TestClient(app)
 
@@ -28,16 +28,6 @@ def test_get_users(session: Session):
     assert response.status_code == 200
 
 
-def test_get_loans(session: Session):
-    def get_session_override():
-        return session
-
-    app.dependency_overrides[get_session] = get_session_override
-
-    response = client.get("/loans/")
-    assert response.status_code == 200
-
-
 def test_create_user(session: Session):
     def get_session_override():
         return session
@@ -45,10 +35,10 @@ def test_create_user(session: Session):
     app.dependency_overrides[get_session] = get_session_override
 
     response = client.post(
-        "/user/", json={"name": "carol", "email": "carol@email.com"})
+        "/user/", json={"username": "carol1234", "email": "carol@email.com", "password": "secretpassword"})
     data = response.json()
     assert response.status_code == 200
-    assert data["name"] == "carol"
+    assert data["username"] == "carol1234"
     assert data["email"] == "carol@email.com"
     assert "id" in data
 
@@ -60,7 +50,7 @@ def test_create_user_error(session: Session):
     app.dependency_overrides[get_session] = get_session_override
 
     response = client.post(
-        "/user/", json={"name": 0, "email": 12})
+        "/user/", json={"username": 0, "email": 12})
     data = response.json()
     assert response.status_code == 422
     assert data["detail"][0]["msg"] == "Input should be a valid string"
@@ -72,12 +62,16 @@ def test_create_loan(session: Session):
 
     app.dependency_overrides[get_session] = get_session_override
 
+    token_response = setup_test_token(session)
+    token_data = token_response.json()
+    headers = {"Authorization": "Bearer %s" % token_data["access_token"]}
+
     response = client.post(
         "/loan/", json={
             "amount": 1000,
             "annual_interest_rate": 0.03,
             "loan_term_in_months": 24
-        })
+        }, headers=headers)
     data = response.json()
     assert response.status_code == 200
     assert data["amount"] == 1000
@@ -92,12 +86,16 @@ def test_create_loan_error(session: Session):
 
     app.dependency_overrides[get_session] = get_session_override
 
+    token_response = setup_test_token(session)
+    token_data = token_response.json()
+    headers = {"Authorization": "Bearer %s" % token_data["access_token"]}
+
     response = client.post(
         "/loan/", json={
             "amount": "one hundred",
             "annual_interest_rate": "3%",
             "loan_term_in_months": "twenty-four"
-        })
+        }, headers=headers)
     data = response.json()
     assert response.status_code == 422
     assert data["detail"][0]["msg"] == "Input should be a valid number, unable to parse string as a number"
@@ -169,3 +167,127 @@ def test_get_loan_summary_error(session: Session):
     data = response.json()
     assert response.status_code == 400
     assert data["detail"] == "No loan with that ID found."
+
+
+def test_get_access_token(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    hashed_password = get_password_hash("secretpassword")
+    test_user = User(hashed_password=hashed_password,
+                     email="carol@email.com", username="carol1234")
+    session.add(test_user)
+    session.commit()
+
+    response = client.post(
+        "/token/", data={"username": "carol1234", "password": "secretpassword"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    data = response.json()
+    assert response.status_code == 200
+    assert data["token_type"] == "bearer"
+    assert "access_token" in data
+
+
+def test_get_access_token_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    hashed_password = get_password_hash("secretpassword")
+    test_user = User(hashed_password=hashed_password,
+                     email="carol@email.com", username="carol1234")
+    session.add(test_user)
+    session.commit()
+
+    response = client.post(
+        "/token/", data={"username": "carol456", "password": "secretpassword"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    data = response.json()
+    assert response.status_code != 200
+    assert data["detail"] == "Incorrect username or password"
+
+
+def test_get_user(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    token_response = setup_test_token(session)
+    token_data = token_response.json()
+    headers = {"Authorization": "Bearer %s" % token_data["access_token"]}
+
+    response = client.get("/users/me/", headers=headers)
+    assert response.status_code == 200
+
+
+def test_get_token_missing_username_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    hashed_password = get_password_hash("secretpassword")
+    test_user = User(hashed_password=hashed_password,
+                     email="carol@email.com", username="carol1234")
+    session.add(test_user)
+    session.commit()
+
+    response = client.post(
+        "/token/", data={"password": "secretpassword"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert response.status_code != 200
+
+
+def test_get_user_invalid_token_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    headers = {"Authorization": "Bearer 2345"}
+
+    response = client.get("/users/me/", headers=headers)
+    assert response.status_code != 200
+
+
+def test_get_user_loans(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    token_response = setup_test_token(session)
+    token_data = token_response.json()
+    headers = {"Authorization": "Bearer %s" % token_data["access_token"]}
+
+    response = client.get("/loans/user", headers=headers)
+    assert response.status_code == 200
+
+
+def setup_test_token(session: Session):
+    hashed_password = get_password_hash("secretpassword")
+    test_user = User(hashed_password=hashed_password,
+                     email="carol@email.com", username="carol1234")
+    session.add(test_user)
+    session.commit()
+
+    response = client.post(
+        "/token/", data={"username": "carol1234", "password": "secretpassword"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    return response
+
+
+def test_authenticate_user_password_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    hashed_password = get_password_hash("secretpassword")
+    test_user = User(hashed_password=hashed_password,
+                     email="carol@email.com", username="carol1234")
+    session.add(test_user)
+    session.commit()
+
+    result = authenticate_user("carol1234", "password", session)
+    assert result == False
