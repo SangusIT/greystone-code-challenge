@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 from app import app, get_session
@@ -32,6 +33,19 @@ def test_create_user(session: Session):
     assert "id" in data
 
 
+def test_create_user_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    response = client.post(
+        "/user/", json={"name": 0, "email": 12})
+    data = response.json()
+    assert response.status_code == 422
+    assert data["detail"][0]["msg"] == "Input should be a valid string"
+
+
 def test_create_loan(session: Session):
     def get_session_override():
         return session
@@ -50,3 +64,20 @@ def test_create_loan(session: Session):
     assert data["annual_interest_rate"] == 0.03
     assert data["loan_term_in_months"] == 24
     assert "id" in data
+
+
+def test_create_loan_error(session: Session):
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+
+    response = client.post(
+        "/loan/", json={
+            "amount": "one hundred",
+            "annual_interest_rate": "3%",
+            "loan_term_in_months": "twenty-four"
+        })
+    data = response.json()
+    assert response.status_code == 422
+    assert data["detail"][0]["msg"] == "Input should be a valid number, unable to parse string as a number"
