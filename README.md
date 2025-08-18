@@ -1,12 +1,12 @@
-# Greystone Code Challenge
+# Loan Magement System
 
 ## Getting Started
 
 Open a terminal in a folder and run the following commands:
 
 ```
-git clone https://github.com/SangusIT/greystone-code-challenge.git
-cd greystone-code-challenge
+git clone https://github.com/SangusIT/loan-management.git
+cd loan-management
 python -m venv venv # or python3 -m venv venv depending on your install
 source venv/bin/activate # use this command for Mac/Linux, source venv/Scripts/activate for Windows if you are using Git Bash, otherwise \venv\Scripts\activate
 pip install -r requirements.txt
